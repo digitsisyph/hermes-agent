@@ -128,6 +128,16 @@ def _parse_env_assignments(raw_env: Optional[List[str]]) -> Dict[str, str]:
     return parsed
 
 
+def _connect_timeout_for(config: dict, default: float = 60.0) -> float:
+    """Resolve a positive MCP connection timeout from server config."""
+    raw = config.get("connect_timeout", default)
+    try:
+        timeout = float(raw)
+    except (TypeError, ValueError):
+        return default
+    return timeout if timeout > 0 else default
+
+
 def _apply_mcp_preset(
     name: str,
     *,
@@ -580,7 +590,9 @@ def cmd_mcp_test(args):
     # Attempt connection
     start = time.monotonic()
     try:
-        tools = _probe_single_server(name, cfg)
+        tools = _probe_single_server(
+            name, cfg, connect_timeout=_connect_timeout_for(cfg)
+        )
         elapsed_ms = (time.monotonic() - start) * 1000
     except Exception as exc:
         elapsed_ms = (time.monotonic() - start) * 1000
@@ -646,7 +658,9 @@ def cmd_mcp_login(args):
 
     # Probe triggers the OAuth flow (browser redirect + callback capture).
     try:
-        tools = _probe_single_server(name, server_config)
+        tools = _probe_single_server(
+            name, server_config, connect_timeout=_connect_timeout_for(server_config)
+        )
         # A clean probe is NOT proof of authentication. Some MCP servers
         # (notably Google's official Drive server) serve initialize +
         # tools/list WITHOUT auth, so the probe lists tools even when the
@@ -710,7 +724,9 @@ def cmd_mcp_configure(args):
     print(color(f"  Connecting to '{name}' to discover tools...", Colors.CYAN))
 
     try:
-        all_tools = _probe_single_server(name, cfg)
+        all_tools = _probe_single_server(
+            name, cfg, connect_timeout=_connect_timeout_for(cfg)
+        )
     except Exception as exc:
         _error(f"Failed to connect: {exc}")
         return

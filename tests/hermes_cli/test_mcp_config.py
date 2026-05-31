@@ -437,6 +437,49 @@ class TestMcpTest:
         assert "Connected" in out
         assert "Tools discovered: 2" in out
 
+    def test_test_uses_configured_connect_timeout(self, tmp_path, capsys, monkeypatch):
+        _seed_config(tmp_path, {
+            "ink": {
+                "url": "https://mcp.ml.ink/mcp",
+                "connect_timeout": 180,
+            },
+        })
+        observed = {}
+
+        def mock_probe(name, config, **kw):
+            observed.update(kw)
+            return [("create_service", "Deploy")]
+
+        monkeypatch.setattr(
+            "hermes_cli.mcp_config._probe_single_server", mock_probe
+        )
+        from hermes_cli.mcp_config import cmd_mcp_test
+
+        cmd_mcp_test(_make_args(name="ink"))
+        capsys.readouterr()
+
+        assert observed["connect_timeout"] == 180.0
+
+    def test_test_uses_documented_default_connect_timeout(self, tmp_path, capsys, monkeypatch):
+        _seed_config(tmp_path, {
+            "ink": {"url": "https://mcp.ml.ink/mcp"},
+        })
+        observed = {}
+
+        def mock_probe(name, config, **kw):
+            observed.update(kw)
+            return [("create_service", "Deploy")]
+
+        monkeypatch.setattr(
+            "hermes_cli.mcp_config._probe_single_server", mock_probe
+        )
+        from hermes_cli.mcp_config import cmd_mcp_test
+
+        cmd_mcp_test(_make_args(name="ink"))
+        capsys.readouterr()
+
+        assert observed["connect_timeout"] == 60.0
+
 
 # ---------------------------------------------------------------------------
 # Tests: env var interpolation
@@ -611,7 +654,10 @@ class TestMcpLogin:
         # Probe returns tools even though auth never completed.
         monkeypatch.setattr(
             "hermes_cli.mcp_config._probe_single_server",
-            lambda name, cfg: [("search_files", "d"), ("read_file_content", "d")],
+            lambda name, cfg, **kw: [
+                ("search_files", "d"),
+                ("read_file_content", "d"),
+            ],
         )
         # No token file is created → _oauth_tokens_present() returns False.
         from hermes_cli.mcp_config import cmd_mcp_login
@@ -633,7 +679,7 @@ class TestMcpLogin:
         # cmd_mcp_login wipes tokens before probing, then the real OAuth flow
         # writes a fresh token during the probe. Simulate that: the mocked
         # probe drops a token file, mirroring a successful authorization.
-        def mock_probe(name, cfg):
+        def mock_probe(name, cfg, **kw):
             token_dir.mkdir(exist_ok=True)
             (token_dir / "realserver.json").write_text('{"access_token": "x"}')
             return [("a", "d"), ("b", "d"), ("c", "d")]
@@ -650,3 +696,30 @@ class TestMcpLogin:
         assert "Authenticated — 3 tool(s) available" in out
         assert "no OAuth token" not in out
 
+    def test_login_uses_configured_connect_timeout(self, tmp_path, capsys, monkeypatch):
+        _seed_config(tmp_path, {
+            "realserver": {
+                "url": "https://mcp.example.com/mcp",
+                "auth": "oauth",
+                "connect_timeout": "180",
+            },
+        })
+        token_dir = tmp_path / "mcp-tokens"
+        observed = {}
+
+        def mock_probe(name, cfg, **kw):
+            observed.update(kw)
+            token_dir.mkdir(exist_ok=True)
+            (token_dir / "realserver.json").write_text('{"access_token": "x"}')
+            return [("a", "d")]
+
+        monkeypatch.setattr(
+            "hermes_cli.mcp_config._probe_single_server", mock_probe
+        )
+
+        from hermes_cli.mcp_config import cmd_mcp_login
+
+        cmd_mcp_login(_make_args(name="realserver"))
+        capsys.readouterr()
+
+        assert observed["connect_timeout"] == 180.0
